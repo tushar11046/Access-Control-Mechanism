@@ -71,16 +71,20 @@ router.post('/accept/:requestID',jwtAuthMiddleWare,async (req,res)=>{
         const userID=req.user.id;
         const user=await User.findById(userID);
 
-        if(user.role=='admin'){
-            return res.status(404).json({message: 'Admin cannot accept or reject any request'});
-        }
-
         if(!user){
             return res.status(404).json({message: 'Invalid User'});
         }
 
+        if(user.role=='admin'){
+            return res.status(404).json({message: 'Admin cannot accept or reject any request'});
+        }
+
         const requestID=req.params.requestID;
         const request=await Request.findById(requestID);
+
+        if(String(userID)!=(String)(request.approver)){
+            return res.status(404).json({message: 'Only the immediate Manager can approve the request'});
+        }
 
         const entityID=request.entityID;
         const entity=await Entity.findById(entityID);
@@ -89,15 +93,11 @@ router.post('/accept/:requestID',jwtAuthMiddleWare,async (req,res)=>{
             return res.status(404).json({message: "Invalid entity ID"});
         }
 
-        if(String(userID)!=(String)(request.approver)){
-            return res.status(404).json({message: 'Only the immediate Manager can approve the request'});
-        }
-
         if(entity.status=='Inactive'){
             return res.status(404).json({message: "Entity does not Exist or Inactive"});
         }
 
-        const requester=await User.findById(requesterID);
+        const requester=await User.findById(request.requester);
 
         if(requester.status=='Inactive'){
             return res.status(404).json({message: "Requester is marked as Inactive cannot approve the request"});
@@ -106,13 +106,10 @@ router.post('/accept/:requestID',jwtAuthMiddleWare,async (req,res)=>{
         request.status='Accepted';
 
         requester.entityOwned.push(entityID);
+        
         await requester.save();
+        await request.save();
 
-        const requestResponse=await request.save();
-
-        if(!requestResponse){
-            return res.status(400).json({message: 'Request could not be accepted!'});
-        }
 
         return res.status(200).json({message:"Request successfully accepted!"});
     }catch(err){

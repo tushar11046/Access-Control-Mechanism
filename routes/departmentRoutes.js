@@ -5,8 +5,8 @@ const Department=require('./../models/department');
 const router=express.Router();
 const {jwtAuthMiddleWare}= require('./../JWT');
 
-const departmentController = {
-    async create(req, res) {
+// Create a new department
+router.post('/create',jwtAuthMiddleWare,async (req,res)=>{
         try{
             const data=req.body;  
     
@@ -17,12 +17,7 @@ const departmentController = {
             }
             const newDpt=new Department(data);
     
-            const response=await newDpt.save();
-    
-            if(!response){
-                console.log(response);
-                res.status(404).json({Error: response});
-            }
+            await newDpt.save();
     
             console.log("New Department Created!");
     
@@ -32,11 +27,7 @@ const departmentController = {
             console.log(err);
             res.status(500).json({error: 'Internal Server Error'});
         }
-    }
-}
-
-// Create a new department
-router.post('/create',jwtAuthMiddleWare,departmentController.create)
+})
 
 // get department information
 router.get('/',jwtAuthMiddleWare,async(req,res)=>{
@@ -54,8 +45,9 @@ router.get('/',jwtAuthMiddleWare,async(req,res)=>{
         res.status(500).json({error: 'Internal Server Error'});
     }
 })
+
 // update department information
-router.put('/updateDepartment/:departmentID',jwtAuthMiddleWare,async (req,res)=>{
+router.put('/updateName/:departmentID', jwtAuthMiddleWare,async (req,res)=>{
     try{
         const departmentID=req.params.departmentID;
         const department=await Department.findById(departmentID);
@@ -68,11 +60,11 @@ router.put('/updateDepartment/:departmentID',jwtAuthMiddleWare,async (req,res)=>
         }
 
         const newdata=req.body;
-        const response=await department.updateOne(newdata);
+        const name=newdata.name;
+        department.name=name;
 
-        if(!response){
-            return res.status(400).json({Error: "Internal Server Error!"});
-        }
+        await department.save();
+
 
         res.status(200).json({message: "Department Data successfully Updated!"});
     }catch(error){
@@ -85,6 +77,10 @@ router.delete('/delete/:departmentID',jwtAuthMiddleWare,async (req,res)=>{
     try{
         const departmentID=req.params.departmentID;
 
+        if(!await Department.findById(departmentID)){
+            return res.status(400).json({message: "No such department Exists!"});
+        }
+
         const userID=req.user.id;
         const user=await User.findById(userID);
 
@@ -94,16 +90,17 @@ router.delete('/delete/:departmentID',jwtAuthMiddleWare,async (req,res)=>{
 
         const users=await User.find({departmentID:departmentID});
 
-        if(users){
+        if(users.length>0){
             return res.status(404).json({message: "Department cannot be deleted as Employees are still associated to it!"});
         }
 
         const entity=await Entity.find({departmentID:departmentID});
 
         if(entity){
-            // delete entity associated to the department
-            const response=await Entity.deleteMany({departmentID:departmentID});
+            await Entity.deleteMany({departmentID:departmentID});
         }
+
+        await Department.findByIdAndDelete(departmentID);
 
         res.status(200).json({message: "Department Successfully deleted!"});
 
@@ -120,7 +117,7 @@ router.get('/information',jwtAuthMiddleWare,async (req,res)=>{
         const user=await User.findById(userID);
 
         if(!user){
-            return res.status(404).json({message: "User do not exist!"});
+            return res.status(400).json({message: "User do not exist!"});
         }
 
         if(user.role=='admin' ){
@@ -129,12 +126,12 @@ router.get('/information',jwtAuthMiddleWare,async (req,res)=>{
         }
 
         if(user.status=='Inactive'){
-            return res.status(404).json({message: "Inactive user login!"});
+            return res.status(400).json({message: "Inactive user login!"});
         }
 
         const departmentusers=await User.find({departmentID:user.departmentID}).select('name age email departmentID designation');
 
-        return res.status(200).json({Departments_Detail: departmentusers});
+        res.status(200).json({Departments_Detail: departmentusers});
     }catch(error){
         console.error(err);
         res.status(500).json({error:"Internal Server error"});

@@ -19,13 +19,7 @@ const entitySchema=new mongoose.Schema({
         type:String,
         enum:['Active','Inactive'],
         default:'Active'
-    },
-    sharedBy:[
-        {
-        type:mongoose.Schema.Types.ObjectId,
-        ref:'User'
-        }  
-    ]
+    }
 });
 
 const Entity=mongoose.model('Entity',entitySchema);

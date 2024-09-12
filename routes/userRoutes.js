@@ -69,7 +69,7 @@ router.post('/signup/admin',async (req,res)=>{
         admin.departmentID=null;
 
         const response=await admin.save();
-        // await sendOTPVerification(response.email,response.id);
+        await sendOTPVerification(response.email,response.id);
 
         const Payload={
             id:response.id
@@ -99,20 +99,16 @@ router.post('/signup',jwtAuthMiddleWare,async (req,res)=>{
 
         const newUser=new User(data);
 
-        if(newUser.role=='admin'){
+        if(newUser.role=='admin' || newUser.designation=='CEO'){
             newUser.managerID=null;
             newUser.departmentID=null;
         }else if(newUser.managerID==null || newUser.departmentID==null){
             return res.status(404).json({error: "Department and Manager ID required!"});
         }
 
-        const response = await newUser.save();
+        await newUser.save();
 
-        // const emailOTP=await sendOTPVerification(response.email,response.id);
-
-        // console.log(emailOTP);
-
-        console.log("Data Saved");
+        await sendOTPVerification(response.email,response.id);
 
         const Payload={
             id:response.id
@@ -135,14 +131,19 @@ router.post('/signup',jwtAuthMiddleWare,async (req,res)=>{
 router.post('/verification',jwtAuthMiddleWare,async (req,res)=>{
     try{
         const userID=req.user.id;
-        // const data=req.body;
 
         const user=await User.findById(userID);
+
+        if(user.verified==true){
+            return res.status(400).json({message: "User already verified!"});
+        }
         const newOTPVerification=await UserOTPVerification.findOne({userID: userID});
-        
-        console.log({user: user});
 
         if(!user || !newOTPVerification){
+            res.status(500).json({error: 'Invalid user ID'});
+        }
+
+        if(!user){
             res.status(500).json({error: 'Invalid user ID'});
         }
 
@@ -152,36 +153,23 @@ router.post('/verification',jwtAuthMiddleWare,async (req,res)=>{
 
         user.verified=true;
 
-        if(user.role!='admin'){
-            const departmentID=user.departmentID;
-            const department=await Department.findById(departmentID);
-            department.members.push(userID);/// if not correlated, remove
+        if(user.role!='admin' && user.designation!='CEO'){
 
-            const response1=await department.save();
+            const immediateManager=await User.findById(user.managerID);
 
-            if(!response1){
-                res.status(400).json({Error: "Internal Server Error"});
+            if(immediateManager.designation == 'CEO' ){
+                
+                const departmentID = user.departmentID;
+                const department = await Department.findById(departmentID);
+                user.entityOwned = department.entities;
+                department.manager=userID;
+            
+                await department.save();
             }
         }
 
-        const immediateManagerID=user.managerID;
-        const immediateManager=await User.findById(immediateManagerID);
+        await user.save();
 
-        if(immediateManager.designation=='CEO'){
-            const departmentID=user.departmentID;
-            const department=await Department.findById(departmentID);
-            console.log(department.entities);
-            user.entityOwned=department.entities;
-            department.manager=userID;
-            
-            await department.save();
-        }
-
-        const response2=await user.save();
-
-        if(!response2){
-            return res.status(400).json("Internal Server Error!");
-        }
 
         res.status(200).json("OTP Authentication Successfull");
     }catch(error){
@@ -247,7 +235,7 @@ router.put('/profile/password',jwtAuthMiddleWare,async (req,res)=>{
     }
 })
 // replace a manager
-router.post('/changeManager/:managerID',jwtAuthMiddleWare,async (req,res)=>{
+router.put('/changeManager/:managerID',jwtAuthMiddleWare,async (req,res)=>{
     try{
         userID=req.user.id;
         const user=await User.findById(userID);
@@ -271,18 +259,9 @@ router.post('/changeManager/:managerID',jwtAuthMiddleWare,async (req,res)=>{
         const data=req.body;
         const newManagerID=data.newManagerID;
         const newManager=await User.findById(newManagerID);
-        console.log(newManager);
 
         if(!newManager){
             return res.status(400).json({message: "Invalid New Manager ID!"});
-        }
-
-        // check if the old manager is the manager or not till now
-        const departmentID=oldManager.departmentID;
-        const department=await Department.findById(departmentID);
-
-        if(department.manager!=oldManagerID){
-            return res.status(400).json({message: "Invalid Manager ID to be changed!"})
         }
 
         //update subordinates manager
@@ -290,80 +269,32 @@ router.post('/changeManager/:managerID',jwtAuthMiddleWare,async (req,res)=>{
             {managerID:oldManagerID},
             {$set:{managerID:newManagerID}}
         )
-
+        
+        newManager.designation=oldManager.designation;
         oldManager.designation='Undefined';
 
         // transfer old manager's entities to new manager
-        console.log(department.entities);
-        await User.updateOne(
-            {id:newManagerID},
-            {$set:{entityOwned:department.entities}}
-        )
-        
-        console.log(newManager.entities);
+        newManager.entityOwned=oldManager.entityOwned;
+        oldManager.entity=[];
 
-        // change departments manager
-        await Department.updateOne(
-            {id:departmentID},
-            {$set:{manager:newManagerID}}
-        )
+        // change new manager's manager to old manager's manager
+        newManager.managerID=oldManager.managerID;
+        
+        // check for department manager change
+        const dpt=await Department.findOne({manager:oldManagerID});
+
+        if(dpt){
+            dpt.manager=newManagerID;
+            await dpt.save();
+        }
+
+        await newManager.save();
+        await oldManager.save();
 
         res.status(200).json({message: "Manager Changed Successfully!"});
 
     }catch(error){
         console.error(error);
-        res.status(500).json({error:"Internal Server error"});
-    }
-})
-
-// Soft delete a user
-
-router.delete('/softDelete/:userID',jwtAuthMiddleWare,async (req,res)=>{
-    try{
-        userID=req.user.id;
-        const user=await User.findById(userID);
-
-        if(!user){
-            return res.status(404).json({message: "User do not exist!"});
-        }
-
-        if(user.role!='admin' ){
-            return res.status(400).json({message:"Only Admin Authorized"});
-        }
-
-        const deleteUserID=req.params.userID;
-        const deleteUser=await User.find(deleteUserID);
-
-        if(await User.find({managerID:deleteUser})){
-            return res.status(400).json({message: "The user to be deleted has employees under his/her management, assign them another manager first!"});
-        }
-
-        const response=await Department.updateMany(
-            { members: deleteUserID },    
-            { $pull: { members: deleteUserID  } }
-        );
-
-        if(!response){
-            return res.status(200).json({message: "User cannot be removed from the department"});
-        }
-        
-        const response1=await Entity.updateMany(
-            {sharedBy:deleteUserID},
-            {$pull:{sharedBy:deleteUserID}}
-        );
-
-        if(!response1){
-            return res.status(200).json({message: "User cannot be removed from entity records"});
-        }
-
-        deleteUser.status='Inactive';
-
-        await deleteUser.save();
-
-        res.status(200).json({message: "User solft deletion successfull!"});
-        
-    }catch(error){
-        console.error(err);
         res.status(500).json({error:"Internal Server error"});
     }
 })
@@ -383,28 +314,9 @@ router.delete('/hardDelete/:userID',jwtAuthMiddleWare,async (req,res)=>{
         }
 
         const deleteUserID=req.params.userID;
-        const deleteUser=await User.find(deleteUserID);
 
-        if(await User.find({managerID:deleteUserID})){
+        if(await User.findOne({managerID:deleteUserID})){
             return res.status(400).json({message: "The user to be deleted has employees under his/her management, assign them another manager first!"});
-        }
-
-        const response=await Department.updateMany(
-            { members: deleteUserID },
-            { $pull: { members: deleteUserID  } }
-        );
-
-        if(!response){
-            return res.status(200).json({message: "User cannot be removed from the department"});
-        }
-        
-        const response1=await Entity.updateMany(
-            {sharedBy:deleteUserID},
-            {$pull:{sharedBy:deleteUserID}}
-        );
-
-        if(!response1){
-            return res.status(200).json({message: "User cannot be removed from entity records"});
         }
 
         const deletion=await User.findByIdAndDelete(deleteUserID);
@@ -413,17 +325,16 @@ router.delete('/hardDelete/:userID',jwtAuthMiddleWare,async (req,res)=>{
             return res.status(200).json({message: "User cannot be deleted"});
         }
 
-        res.status(200).json({message: "User solft deletion successfull!"});
+        res.status(200).json({message: "User Hard deletion successfull!"});
         
     }catch(error){
-        console.error(err);
+        console.error(error);
         res.status(500).json({error:"Internal Server error"});
     }
 })
 
 // introduce an intermmediate manager between 2 people
-
-router.get('intermmediate/manger/:subordinateID',jwtAuthMiddleWare,async(req,res)=>{
+router.post('/intermmediateManager/:subordinateID',jwtAuthMiddleWare,async(req,res)=>{
     try{
         userID=req.user.id;
         const user=await User.findById(userID);
@@ -442,8 +353,8 @@ router.get('intermmediate/manger/:subordinateID',jwtAuthMiddleWare,async(req,res
         if(!subordinate){
             return res.status(400).json({message: "Invalid Subordiante ID!"});
         }
-
-        const intermManagerID=req.body;
+        const data=req.body;
+        const intermManagerID=data.intermManagerID;
         const intermManager=await User.findById(intermManagerID);
 
         if(!intermManager){
@@ -451,106 +362,53 @@ router.get('intermmediate/manger/:subordinateID',jwtAuthMiddleWare,async(req,res
         }
 
         intermManager.managerID=subordinate.managerID;
-        subordinate.managerID=interManager.id;
+        subordinate.managerID=intermManager.id;
 
         await intermManager.save();
         await subordinate.save();
 
         res.status(200).json({message: "Intermmediate Manager Added"});
     }catch(error){
-        console.error(err);
+        console.error(error);
         res.status(500).json({error:"Internal Server error"});
     }
 })
 
-// add a member to user group
-router.post('/addUserGroup/:userGroupID',jwtAuthMiddleWare,async (req,res)=>{
+// Soft delete a user
+router.delete('/softDelete/:userID',jwtAuthMiddleWare,async (req,res)=>{
     try{
-        const adminID=req.user.id;
-        const admin=await User.find(adminID);
-
-        if(admin.role!='admin'){
-            return res.status(500).json({message: "Unauthorized access: Only admin allowed!"});
-        }
-
-        const usergroupID=req.params.userGroupID;
-        const usergroup=await userGroup.findById(usergroupID);
-
-        if(!usergroup){
-            return res.status(500).json({message: "Invalid User Group ID!"});
-        }
-        const userID=req.body;
+        userID=req.user.id;
         const user=await User.findById(userID);
 
         if(!user){
-            return res.status(500).json({message: "Invalid user ID!"});
+            return res.status(404).json({message: "User do not exist!"});
         }
 
-        if(userGroup.members.includes(userID)){
-            return res.status(500).json({message: "User is already a part of the group."});
+        if(user.role!='admin' ){
+            return res.status(400).json({message:"Only Admin Authorized"});
         }
 
-        await userGroup.updateOne(
-            {id:usergroupID},
-            {$push:{members:userID}}
-        );
+        const deleteUserID=req.params.userID;
+        const deleteUser=await User.findById(deleteUserID);
 
-        // add the entities of the group to the user
-        const newEntities = userGroup.entities.filter(entity => !user.entityOwned.includes(entity));
-
-        if(newEntities.length>0){
-            user.entityOwned.push(newEntities);
+        if(deleteUser.status=='Inactive'){
+            return res.status(400).json({message: 'User already Inactive'});
         }
 
-        res.status(200).json({message: "User successfully added to the group!"});
+        // check for subordinates
+        if(await User.findOne({managerID:deleteUserID})){
+            return res.status(400).json({message: "The user to be deleted has employees under his/her management, assign them another manager first!"});
+        }
 
+        deleteUser.status='Inactive';
+
+        await deleteUser.save();
+
+        res.status(200).json({message: "User solft deletion successfull!"});
+        
     }catch(error){
-        console.log(error);
-        return res.status(500).json({error: "Internal Server Error!"});
-    }
-})
-
-// remove a user from a user group
-router.delete('/removeUser/:userGroupID',jwtAuthMiddleWare,async (req,res)=>{
-    try{
-        const adminID=req.user.id;
-        const admin=await User.find(adminID);
-
-        if(admin.role!='admin'){
-            return res.status(500).json({message: "Unauthorized access: Only admin allowed!"});
-        }
-
-        const usergroupID=req.params.userGroupID;
-        const usergroup=await userGroup.findById(usergroupID);
-
-        if(!usergroup){
-            return res.status(500).json({message: "Invalid User Group ID!"});
-        }
-        const userID=req.body;
-        const user=await User.findById(userID);
-
-        if(!user){
-            return res.status(500).json({message: "Invalid user ID!"});
-        }
-
-        if(!userGroup.members.includes(userID)){
-            return res.status(500).json({message: "User is already not a part of the group."});
-        }
-
-        await userGroup.updateOne(
-            {id:usergroupID},
-            {$pull:{members:userID}}
-        );
-
-        // remove the entities of the group from the user
-        userGroup.entities.filter(entity => !user.entityOwned.includes(entity));
-
-        res.status(200).json({message: "User successfully removed from the group"});
-
-
-    }catch(error){
-        console.log(error);
-        return res.status(500).json({error: "Internal Server Error!"});
+        console.error(error);
+        res.status(500).json({error:"Internal Server error"});
     }
 })
 

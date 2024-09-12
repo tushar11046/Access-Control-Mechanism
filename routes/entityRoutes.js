@@ -36,7 +36,15 @@ router.post('/create',jwtAuthMiddleWare,async (req,res)=>{
 
         dpt.entities.push(response.id);
 
+        if(dpt.manager!=null){
+            const manager=await User.findById(dpt.manager);
+            manager.entityOwned.push(response.id);
+            
+            await manager.save();
+        }
+
         await dpt.save();
+        
 
         res.status(200).json({message: "Entity successfully created!"});
 
@@ -70,7 +78,7 @@ router.get('/info',jwtAuthMiddleWare,async(req,res)=>{
 })
 
 // access an entity
-router.get('/:entityID',jwtAuthMiddleWare,async (req,res)=>{
+router.get('/access/:entityID',jwtAuthMiddleWare,async (req,res)=>{
     try{
         const userID=req.user.id;
         const entityID=req.params.entityID;
@@ -81,11 +89,18 @@ router.get('/:entityID',jwtAuthMiddleWare,async (req,res)=>{
         if(entity.status=='Inactive'){
             return res.status(404).json({message: "Access Denied: Entity Inactive!"});
         }
-
-        if(!user.entityOwned.includes(entityID)){
-            return res.status(404).json({message: "The user do not have access to the entity!"});
+        if(user.group!=null){
+            if(await userGroup.findOne(
+                {_id:user.group},
+                {entities:entityID}
+            )){
+                return res.status(200).json({message: "Entity accessed successfully!"});
+            }
         }
-        res.status(200).json({message: "Entity accessed successfully!"});
+        if(user.entityOwned.includes(entityID)){
+            return res.status(200).json({message: "Entity accessed successfully!"});
+        }
+        res.status(400).json({message: "Unauthorized access!"});
     }catch(error){
         console.log(error);
         return res.status(500).json({error: 'Internal Server Error'});
@@ -93,7 +108,7 @@ router.get('/:entityID',jwtAuthMiddleWare,async (req,res)=>{
 })
 
 // update an entity's department
-router.put('/updateDpt/:entityID',jwtAuthMiddleWare,async (req,res)=>{
+router.put('/updateDPT/:entityID',jwtAuthMiddleWare,async (req,res)=>{
     try{
         const userID=req.user.id;
         const user=await User.findById(userID);
@@ -122,60 +137,38 @@ router.put('/updateDpt/:entityID',jwtAuthMiddleWare,async (req,res)=>{
 
         // remove from old department and add to new department
         const modifyDepartment=await Department.updateOne(
-            {id:entity.departmentID},
+            {_id:entity.departmentID},
             {$pull:{entities:entityID}}
         )
 
         if(!modifyDepartment){
             return res.status(404).json({message: "Modification failed"});
-        }
+        };
 
-        const addToDepartment=await Department.updateOne(
-            {id:data.departmentID},
-            {$push:{entities:entityID}}
-        )
-
-        if(!addToDepartment){
-            return res.status(404).json({message: "Modification failed"});
-        }
+        newDpt.entities.push(entityID);
 
         // remove entity from users
-        const removefromUsers=await User.updateMany(
+        await User.updateMany(
             {entityOwned:entityID},
             {$pull:{entityOwned:entityID}}
-        )
+        );
 
-        if(!removefromUsers){
-            return res.status(404).json({message: "Modification failed"});
-        }
-
-        // remove user from entity
-        const removeusersfromentity=await Entity.updateMany(
-            {id:entityID},
+        // remove users from entity
+        await Entity.updateMany(
+            {_id:entityID},
             {$set:{sharedBy:[]}}
-        )
-
-        if(!removeusersfromentity){
-            return res.status(404).json({message: "Modification failed"});
-        }
-
-        const modifyEntityDptID=await Entity.updateOne(
-            {id:entityID},
-            {$set:{departmentID:data}}
         );
 
-        if(!modifyEntityDptID){
-            return res.status(404).json({message: "Modification failed"});
-        }
+        entity.departmentID=data.departmentID;
 
-        const modifyEntityDptName=await Entity.updateOne(
-            {id:entityID},
-            {$set:{departmentName:newDpt.name}}
+        await userGroup.updateMany(
+            {entities:entityID},
+            {$pull:{entities:entityID}}
         );
-
-        if(!modifyEntityDptName){
-            return res.status(404).json({message: "Modification failed"});
-        }
+        // change entities department name
+        entity.departmentName=newDpt.name;
+        entity.save();
+        newDpt.save();
 
         res.status(200).json({message: "Successfully modified!"});
 
@@ -216,12 +209,14 @@ router.put('/ChangeName/:entityID',jwtAuthMiddleWare,async (req,res)=>{
 })
 
 // remove access of an entity from user
-router.delete('/removeaccess/:entityID',jwtAuthMiddleWare,async(req,res)=>{
+router.put('/removeaccess/:entityID',jwtAuthMiddleWare,async(req,res)=>{
     try{
         data=req.body;
         const entityID=req.params.entityID;
 
-        const user=await User.findById(req.user.id);
+        const userID=req.user.id;
+        const user=await User.findById(userID);
+        console.log(user);
 
         if(!user){
             return res.status(404).json({error: "Invalid User Login!"});
@@ -238,11 +233,12 @@ router.delete('/removeaccess/:entityID',jwtAuthMiddleWare,async(req,res)=>{
             return res.status(404).json({error: "Invalid User ID!"});
         }
 
-        if(!user.entityOwned.includes(entityID)){
+        if(!removeUser.entityOwned.includes(entityID)){
             return res.status(200).json({error: "User do not have the entities access already!"});
         }
-        await User.updateMany(
-            {entityOwned:entityID},
+
+        await User.updateOne(
+            {_id:removeUserID},
             {$pull:{entityOwned:entityID}}
         )
 
@@ -274,25 +270,37 @@ router.delete('/softDelete/:entityID',jwtAuthMiddleWare,async(req,res)=>{
         if(!entity){
             return res.status(404).json({message: "Invalid Entity ID"});
         }
-        const response=await User.updateMany(
+
+        const removeEntityFromUser=await User.updateMany(
             { entityOwned: enttyID },
             { $pull: { entityOwned: enttyID  } }
         );
 
-        if(!response){
+        if(!removeEntityFromUser){
             return res.status(404).json({message: "Entity can not be removed from user's record"});
         }
 
-        const response1=await Department.updateMany(
+        const removeEntityFromDepartment=await Department.updateMany(
             { entities: enttyID },
             { $pull: { entities: enttyID  } }
         );
 
-        if(!response1){
+        if(!removeEntityFromDepartment){
+            return res.status(404).json({message: "Entity can not be removed from Department's record"});
+        }
+
+        const removeEntityFromUserGroup=await userGroup.updateMany(
+            {entities:enttyID},
+            {$pull:{entities:enttyID}}
+        )
+        
+        if(!removeEntityFromUserGroup){
             return res.status(404).json({message: "Entity can not be removed from Department's record"});
         }
 
         entity.status='Inactive';
+
+        entity.save();
 
         console.log("Entity Deactivation Successfull!");
 
@@ -328,21 +336,30 @@ router.delete('/hardDelete/:entityID',jwtAuthMiddleWare,async (req,res)=>{
 
         console.log("Check 1");
 
-        const response=await User.updateMany(
+        const removeEntityfromUser=await User.updateMany(
             { entityOwned: enttyID },
             { $pull: { entityOwned: enttyID  } }
         );
 
-        if(!response){
+        if(!removeEntityfromUser){
             return res.status(404).json({message: "Entity can not be removed from user's record"});
         }
 
-        const response1=await Department.updateMany(
+        const removeEntityfromDepartment=await Department.updateMany(
             { entities: enttyID },
             { $pull: { entities: enttyID  } }
         );
 
-        if(!response1){
+        if(!removeEntityfromDepartment){
+            return res.status(404).json({message: "Entity can not be removed from Department's record"});
+        }
+
+        const removeEntityFromUserGroup=await userGroup.updateMany(
+            {entities:enttyID},
+            {$pull:{entities:entityID}}
+        )
+        
+        if(!removeEntityFromUserGroup){
             return res.status(404).json({message: "Entity can not be removed from Department's record"});
         }
 
@@ -382,7 +399,8 @@ router.post('/add/userGroup/:userGroupID',jwtAuthMiddleWare,async (req,res)=>{
             return res.status(404).json({error: "Invalid User group ID!"});
         }
 
-        const entityID=req.body;
+        const data=req.body;
+        const entityID=data.entityID;
         const entity=await Entity.findById(entityID);
 
         if(!entity){

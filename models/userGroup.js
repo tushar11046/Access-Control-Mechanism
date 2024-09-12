@@ -13,8 +13,7 @@ const userGroupSchema=new mongoose.Schema({
     },
     managerID:{
         type:mongoose.Schema.Types.ObjectId,
-        ref:'User',
-        required:true
+        ref:'User'
     },
     entities:[
         {
