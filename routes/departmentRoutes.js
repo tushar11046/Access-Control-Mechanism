@@ -33,7 +33,7 @@ router.post('/create',jwtAuthMiddleWare,async (req,res)=>{
 router.get('/',jwtAuthMiddleWare,async(req,res)=>{
     try{
         const response=await Department.find();
-
+    
         if(!response){
             return res.status(404).json({error: 'Could not fetch department details'});
         }

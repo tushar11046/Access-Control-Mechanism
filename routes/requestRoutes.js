@@ -2,7 +2,6 @@ const express=require('express');
 const User=require('./../models/user');
 const Entity=require('./../models/entity');
 const Request=require('./../models/request');
-const Department=require('./../models/department');
 const router=express.Router();
 const {jwtAuthMiddleWare}= require('./../JWT');
 

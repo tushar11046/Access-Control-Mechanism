@@ -1,14 +1,14 @@
 const jwt=require('jsonwebtoken');
 
-const jwtAuthMiddleWare=(req,res,next)=>{
+const jwtAuthMiddleWare=(req,res,next) => {
 
     // First check request header has authorization or not
 
     const authorization=req.headers.authorization
-    if(!authorization) return res.status(401).json({error: 'Token not found'});
+    if( !authorization ) return res.status(401).json({error: 'Token not found'});
 
     // Extract jwt token from request header
-    const token =   req.headers.authorization.split(' ')[1];
+    const token = req.headers.authorization.split(' ')[1];
 
     if(!token){
         return res.status(401).json({error:"Unauthorized Access"});

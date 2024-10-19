@@ -1,23 +1,19 @@
 const express=require('express');
-const mongoose=require('mongoose'); 
 require('dotenv').config();
 const nodejsmailer=require('nodemailer');
 const User=require('./../models/user');
-const Entity = require('./../models/entity');
 const Department = require('../models/department');
-const userGroup=require('../models/userGroup');
 const UserOTPVerification=require('./../models/userOTPVerification');
 const router=express.Router();
 const {jwtAuthMiddleWare, generateToken}= require('./../JWT');
 
 // send an Email from NODEJS Server using nodemailer module
 
-
 var transporter = nodejsmailer.createTransport({
     service:'gmail',
     auth:{
         user:'tusharjoshi11046@gmail.com',
-        pass:'rvjywxaakuuijeej'  
+        pass:'pmrr lptd osxg nkri'  
     }
 });
 
@@ -50,25 +46,23 @@ const sendOTPVerification = async (email,id) => {
         throw error; // Re-throw error for further handling
     }
 };
-// sign up the admin
-router.post('/signup/admin',async (req,res)=>{
+
+// signup an admin
+router.post('/admin/signup',async (req,res)=>{
     try{
-
-        if(await User.findOne({role:'admin'})){
-            return res.status(400).json({error: 'Admin already registered, Multiple admins not Authorized!'});
-        }
-
         const data=req.body;
-        const admin=new User(data);
 
-        if(admin.role!='admin'){
-            return res.status(400).json({error: 'Only Admin Singup Allowed!'});
+        const newUser=new User(data);
+
+        if(newUser.role=='admin'){
+            newUser.managerID=null;
+            newUser.departmentID=null;
+        }else{
+            return res.status(400).json({error: "Only admin signup allowed in this route"});
         }
 
-        admin.managerID=null;
-        admin.departmentID=null;
+        const response=await newUser.save();
 
-        const response=await admin.save();
         await sendOTPVerification(response.email,response.id);
 
         const Payload={
@@ -77,16 +71,16 @@ router.post('/signup/admin',async (req,res)=>{
 
         console.log(JSON.stringify(Payload));
         const token=generateToken(Payload);
+        console.log("Token is: ",token);
         console.log("ID is: ",response.id);
 
         res.status(200).json({response: response, token: token});
 
-    }catch(error){
-        console.log(error);
+    }catch(err){
+        console.log(err);
         res.status(500).json({error: 'Internal Server Error'});
     }
 })
-
 // Sign up a new User
 router.post('/signup',jwtAuthMiddleWare,async (req,res)=>{
     try{
@@ -106,7 +100,7 @@ router.post('/signup',jwtAuthMiddleWare,async (req,res)=>{
             return res.status(404).json({error: "Department and Manager ID required!"});
         }
 
-        await newUser.save();
+        const response= await newUser.save();
 
         await sendOTPVerification(response.email,response.id);
 
@@ -131,6 +125,8 @@ router.post('/signup',jwtAuthMiddleWare,async (req,res)=>{
 router.post('/verification',jwtAuthMiddleWare,async (req,res)=>{
     try{
         const userID=req.user.id;
+
+        const data = req.body;
 
         const user=await User.findById(userID);
 
@@ -187,9 +183,11 @@ router.post('/login',async (req,res)=>{
         
         if(!user || !(await user.comparePassword(password))){
             return res.status(401).json({error: 'Invalid username or password'});
-        }
+        } 
+        
+        console.log("User Verfied: ",user.verified);
 
-        if(user.status=='Inactive' || user.verified=='false'){
+        if(user.status=='Inactive' || user.verified==false){
             return res.status(400).json({message: "User marked as Inactive or not Verified!"});
         }
 
@@ -200,8 +198,8 @@ router.post('/login',async (req,res)=>{
         const token=generateToken(Payload);
 
         res.json({token})
-    }catch(err){
-        console.log(err);
+    }catch(error){
+        console.log(error);
         res.status(500).json({error: 'Internal Server Error'});
     }
 })
@@ -234,6 +232,7 @@ router.put('/profile/password',jwtAuthMiddleWare,async (req,res)=>{
         res.status(500).json({error:"Internal Server error"});
     }
 })
+
 // replace a manager
 router.put('/changeManager/:managerID',jwtAuthMiddleWare,async (req,res)=>{
     try{
